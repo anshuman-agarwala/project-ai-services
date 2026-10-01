@@ -10,6 +10,7 @@ RUN microdnf install -y python3.12-devel \
     rpm -ivh /tmp/epel-release.rpm && \
     rm -f /tmp/epel-release.rpm && \
     microdnf install -y spatialindex-devel && \
+    microdnf install -y tesseract tesseract-osd tesseract-langpack-eng tesseract-langpack-spa tesseract-langpack-jpn tesseract-langpack-deu tesseract-langpack-ita tesseract-langpack-fra && \
     microdnf clean all && \
     rm -rf /usr/bin/python && rm -rf /usr/bin/python3 && \
     ln -s /usr/bin/python3.12 /usr/bin/python && ln -s /usr/bin/python3.12 /usr/bin/python3

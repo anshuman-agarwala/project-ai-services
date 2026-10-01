@@ -106,7 +106,7 @@ def convert_doc(
     if not path.exists():
         raise FileNotFoundError(f"Document not found: {path}")
 
-    doc_converter: DocumentConverter = get_doc_converter()
+    doc_converter: DocumentConverter = get_doc_converter(ocr_doc=True)
 
     # Get total page count
     total_pages = get_document_page_count(str(path))
@@ -179,7 +179,7 @@ def convert_doc(
         except Exception as e:
             logger.warning(f"Failed to cleanup cache directory {chunk_cache_dir}: {e}")
 
-def get_doc_converter():
+def get_doc_converter(ocr_doc=False):
     """Create and configure a Docling DocumentConverter instance.
 
     Sets up the PDF pipeline options, including model paths, table structure parsing,
@@ -204,10 +204,15 @@ def get_doc_converter():
             logger.warning(f"DOCLING_MODELS_PATH set to {artifacts_path} but directory does not exist")
     else:
         logger.debug("DOCLING_MODELS_PATH not set. Docling will use default model loading behavior.")
+
+    if ocr_doc:
+        from docling.datamodel.pipeline_options import TesseractOcrOptions
+        ocr_options = TesseractOcrOptions(lang=["fra", "deu", "spa", "eng", "ita", "jpn"], force_full_page_ocr=True, bitmap_area_threshold=0.01)
+        pipeline_options.ocr_options = ocr_options
     
     pipeline_options.do_table_structure = True
     pipeline_options.table_structure_options.do_cell_matching = True
-    pipeline_options.do_ocr = False
+    pipeline_options.do_ocr = ocr_doc
 
     doc_converter = DocumentConverter(
         allowed_formats=[
