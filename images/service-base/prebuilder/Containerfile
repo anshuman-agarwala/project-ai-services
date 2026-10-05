@@ -10,7 +10,7 @@ RUN curl -o /tmp/epel-release.rpm https://dl.fedoraproject.org/pub/epel/epel-rel
     rpm -ivh /tmp/epel-release.rpm && \
     rm -f /tmp/epel-release.rpm && \
     printf "[baseos]\nname=CentOS Stream 9 - BaseOS\nbaseurl=https://mirror.stream.centos.org/9-stream/BaseOS/\$basearch/os/\ngpgcheck=0\nenabled=1\n\n[appstream]\nname=CentOS Stream 9 - AppStream\nbaseurl=https://mirror.stream.centos.org/9-stream/AppStream/\$basearch/os/\ngpgcheck=0\nenabled=1\n\n[crb]\nname=CentOS Stream 9 - CRB\nbaseurl=https://mirror.stream.centos.org/9-stream/CRB/\$basearch/os/\ngpgcheck=0\nenabled=1\n" > /etc/yum.repos.d/centos-stream.repo && \
-    yum install -y --disablerepo='*' --enablerepo='baseos,appstream,crb,epel' --setopt=tsflags=nodocs gcc-c++ python3.12-devel python3.12-pip git rust cargo openssl-devel libffi-devel zlib-devel tesseract tesseract-devel leptonica-devel && \
+    yum install -y --disablerepo='*' --enablerepo=baseos --enablerepo=appstream --enablerepo=crb --enablerepo=epel --setopt=tsflags=nodocs gcc-c++ python3.12-devel python3.12-pip git rust cargo openssl-devel libffi-devel zlib-devel tesseract tesseract-devel leptonica-devel && \
     yum clean all && rm -rf /var/cache/yum && \
     rm -rf /usr/bin/python && rm -rf /usr/bin/python3 && \
     ln -s /usr/bin/pip3.12 /usr/bin/pip && ln -s /usr/bin/pip3.12 /usr/bin/pip3 && \
