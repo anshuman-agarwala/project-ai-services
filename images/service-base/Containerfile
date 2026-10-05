@@ -9,9 +9,9 @@ RUN microdnf install -y python3.12-devel \
     curl -o /tmp/epel-release.rpm https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm && \
     rpm -ivh /tmp/epel-release.rpm && \
     rm -f /tmp/epel-release.rpm && \
-    printf "[appstream]\nname=CentOS Stream 9 - AppStream\nbaseurl=https://mirror.stream.centos.org/9-stream/AppStream/\$basearch/os/\ngpgcheck=0\nenabled=1\n\n[crb]\nname=CentOS Stream 9 - CRB\nbaseurl=https://mirror.stream.centos.org/9-stream/CRB/\$basearch/os/\ngpgcheck=0\nenabled=1\n" > /etc/yum.repos.d/centos-stream.repo && \
+    printf "[baseos]\nname=CentOS Stream 9 - BaseOS\nbaseurl=https://mirror.stream.centos.org/9-stream/BaseOS/\$basearch/os/\ngpgcheck=0\nenabled=1\n\n[appstream]\nname=CentOS Stream 9 - AppStream\nbaseurl=https://mirror.stream.centos.org/9-stream/AppStream/\$basearch/os/\ngpgcheck=0\nenabled=1\n\n[crb]\nname=CentOS Stream 9 - CRB\nbaseurl=https://mirror.stream.centos.org/9-stream/CRB/\$basearch/os/\ngpgcheck=0\nenabled=1\n" > /etc/yum.repos.d/centos-stream.repo && \
     microdnf install -y spatialindex-devel && \
-    microdnf install -y tesseract leptonica tesseract-osd tesseract-langpack-eng tesseract-langpack-spa tesseract-langpack-jpn tesseract-langpack-deu tesseract-langpack-ita tesseract-langpack-fra && \
+    microdnf install -y --allowerasing tesseract leptonica tesseract-osd tesseract-langpack-eng tesseract-langpack-spa tesseract-langpack-jpn tesseract-langpack-deu tesseract-langpack-ita tesseract-langpack-fra && \
     microdnf clean all && \
     rm -rf /usr/bin/python && rm -rf /usr/bin/python3 && \
     ln -s /usr/bin/python3.12 /usr/bin/python && ln -s /usr/bin/python3.12 /usr/bin/python3
