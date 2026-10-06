@@ -213,6 +213,7 @@ def get_doc_converter(ocr_doc=False):
     pipeline_options.do_table_structure = True
     pipeline_options.table_structure_options.do_cell_matching = True
     pipeline_options.do_ocr = ocr_doc
+    pipeline_options.images_scale = 2.0
 
     doc_converter = DocumentConverter(
         allowed_formats=[
