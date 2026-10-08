@@ -25,6 +25,75 @@ from docling_core.types.doc.document import DoclingDocument
 
 logger = get_logger("docling_utils")
 
+# Route Docling and OCR subsystem loggers to Digitize log formatting
+for _logger_name in ("docling", "docling_core", "docling_ibm_models", "docling_parse", "rapidocr"):
+    get_logger(_logger_name)
+
+
+def _patch_rapidocr():
+    """Apply compatibility patches to RapidOCR 3.x for ppc64le & Docling."""
+    try:
+        from types import SimpleNamespace
+        import numpy as np
+        import cv2
+        import rapidocr
+        from rapidocr import RapidOCR
+
+        # 1. Patch RapidOCR.crop_text_regions with exact float32 perspective transform
+        if not getattr(RapidOCR, "_digitize_patched", False):
+            def _fixed_crop_text_regions(self, img: np.ndarray, det_boxes: np.ndarray):
+                img_crop_list = []
+                for box in det_boxes:
+                    pts = np.array(box, dtype=np.float32)
+                    w = max(int(np.linalg.norm(pts[0] - pts[1])), 1)
+                    h = max(int(np.linalg.norm(pts[0] - pts[3])), 1)
+                    pts_std = np.array([[0, 0], [w, 0], [w, h], [0, h]], dtype=np.float32)
+                    M = cv2.getPerspectiveTransform(pts, pts_std)
+                    crop = cv2.warpPerspective(
+                        img,
+                        M,
+                        (w, h),
+                        borderMode=cv2.BORDER_CONSTANT,
+                        borderValue=(255, 255, 255),
+                    )
+                    if h * 1.0 / w >= 1.5:
+                        crop = np.rot90(crop)
+                    img_crop_list.append(crop)
+                return img_crop_list
+
+            RapidOCR.crop_text_regions = _fixed_crop_text_regions
+            RapidOCR._digitize_patched = True
+
+        # 2. Patch TextRecognizer to safely accept TextClsOutput or list of crops
+        import rapidocr.ch_ppocr_rec.main as r_rec
+        rec_cls = getattr(r_rec, "TextRecognizer", getattr(r_rec, "TextRec", None))
+        if rec_cls and not getattr(rec_cls, "_digitize_patched", False):
+            orig_rec_call = rec_cls.__call__
+
+            def _safe_rec_call(self, args):
+                if hasattr(args, "img_list"):
+                    img_list = args.img_list
+                elif isinstance(args, list):
+                    img_list = args
+                elif isinstance(args, np.ndarray):
+                    img_list = [args]
+                elif hasattr(args, "img"):
+                    img_list = [args.img] if isinstance(args.img, np.ndarray) else args.img
+                else:
+                    img_list = args
+
+                adapted_args = SimpleNamespace(
+                    img=img_list,
+                    return_word_box=getattr(args, "return_word_box", False),
+                )
+                return orig_rec_call(self, adapted_args)
+
+            rec_cls.__call__ = _safe_rec_call
+            rec_cls._digitize_patched = True
+
+    except Exception as exc:
+        logger.warning(f"Could not apply RapidOCR patch: {exc}")
+
 
 def _make_db_cancel_check(task_id: str):
     """
@@ -106,7 +175,7 @@ def convert_doc(
     if not path.exists():
         raise FileNotFoundError(f"Document not found: {path}")
 
-    doc_converter: DocumentConverter = get_doc_converter()
+    doc_converter: DocumentConverter = get_doc_converter(ocr_doc=True)
 
     # Get total page count
     total_pages = get_document_page_count(str(path))
@@ -179,11 +248,11 @@ def convert_doc(
         except Exception as e:
             logger.warning(f"Failed to cleanup cache directory {chunk_cache_dir}: {e}")
 
-def get_doc_converter():
+def get_doc_converter(ocr_doc=False):
     """Create and configure a Docling DocumentConverter instance.
 
     Sets up the PDF pipeline options, including model paths, table structure parsing,
-    and cell matching, and disables OCR.
+    and cell matching, with optional RapidOCR support.
     """
     import os
     from pathlib import Path
@@ -204,10 +273,24 @@ def get_doc_converter():
             logger.warning(f"DOCLING_MODELS_PATH set to {artifacts_path} but directory does not exist")
     else:
         logger.debug("DOCLING_MODELS_PATH not set. Docling will use default model loading behavior.")
+
+    if ocr_doc:
+        _patch_rapidocr()
+        from docling.datamodel.pipeline_options import RapidOcrOptions
+        ocr_options = RapidOcrOptions(
+            backend="onnxruntime",
+            force_full_page_ocr=True,
+            rapidocr_params={
+                "Det.limit_side_len": 960,
+                "Det.limit_type": "max",
+            },
+        )
+        pipeline_options.ocr_options = ocr_options
     
     pipeline_options.do_table_structure = True
     pipeline_options.table_structure_options.do_cell_matching = True
-    pipeline_options.do_ocr = False
+    pipeline_options.do_ocr = ocr_doc
+    pipeline_options.images_scale = 2.0
 
     doc_converter = DocumentConverter(
         allowed_formats=[

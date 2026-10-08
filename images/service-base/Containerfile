@@ -40,6 +40,7 @@ RUN --mount=type=bind,from=prebuilder,source=/wheels,target=/wheels,ro \
         --extra-index-url https://wheels.developerfirst.ibm.com/ppc64le/linux \
         --prefer-binary && \
     pip cache purge && \
+    docling-tools models download rapidocr --rapidocr-backend-lang onnxruntime:ch -o /var/docling-models && \
     python download_docling_models.py && \
     rm -rf ~/.cache/huggingface && \
     rm -rf /var/venv/lib/python3.12/site-packages/pip \
