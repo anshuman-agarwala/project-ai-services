@@ -16,7 +16,7 @@ model_downloader.download_models(
     output_dir=OUTPUT_DIR,
     with_layout=True,
     with_tableformer=True,
-    with_rapidocr=False,
+    with_rapidocr=True,
     with_easyocr=False,
     with_code_formula=False,
     with_picture_classifier=False

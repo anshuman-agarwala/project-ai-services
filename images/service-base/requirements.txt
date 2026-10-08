@@ -68,6 +68,7 @@ opencv-python==5.0.0.93
 openpyxl==3.1.5
 opensearch-py==3.1.0
 orjson==3.11.7
+onnxruntime==1.27.0
 packaging==26.3
 pandas==3.0.5
 paramiko==5.0.0

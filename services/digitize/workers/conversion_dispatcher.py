@@ -35,7 +35,7 @@ import multiprocessing
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
-from common.misc_utils import get_logger
+from common.misc_utils import get_logger, set_log_level
 from digitize.db.manager import db_manager
 from digitize.db.models import ConversionTask, ConversionTaskStatus
 from digitize.exceptions import JobCancelledError
@@ -55,6 +55,11 @@ _connector_rr_index: int = 0  # index into the live connector list for turn 2
 # not spawned on module import (which would affect test collection, CLI tools,
 # and any code that transitively imports this module).
 _process_pool: ProcessPoolExecutor | None = None
+
+
+def _init_conversion_worker() -> None:
+    """Initializer for spawned worker processes in the conversion pool."""
+    set_log_level(settings.common.app.log_level)
 
 def _cancel_if_pending(task_id: str, error: str, log_msg: str) -> bool:
     """Re-read *task_id* from the DB and, if it is ``CANCEL_PENDING``, write
@@ -224,6 +229,7 @@ async def dispatch_loop() -> None:
         max_workers=conversion_semaphore.capacity,  # default 4
         mp_context=multiprocessing.get_context("spawn"),
         max_tasks_per_child=1,
+        initializer=_init_conversion_worker,
     )
     logger.info(
         f"Conversion dispatcher started (pool workers={conversion_semaphore.capacity})"
