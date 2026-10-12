@@ -2,6 +2,8 @@
 Unit tests for document processing utilities.
 """
 
+import json
+from pathlib import Path
 import pytest
 from unittest.mock import Mock, MagicMock, patch
 from collections import Counter
@@ -682,3 +684,230 @@ class TestSplitJapaneseSentences:
         result = _split_japanese_sentences("Power10はIBMのプロセッサです。16コアを搭載しています。")
         assert result == ["Power10はIBMのプロセッサです。", "16コアを搭載しています。"]
 
+
+
+@pytest.mark.unit
+class TestProcessImage:
+    """Tests for process_image in digitize.processing.images."""
+
+    def test_process_image_no_pictures(self, tmp_path):
+        """When converted document has no pictures, returns 0 and writes empty dict."""
+        from digitize.processing.images import process_image
+
+        mock_doc = MagicMock()
+        mock_doc.pictures = []
+        out_file = tmp_path / "images.json"
+
+        count, proc_time, failures = process_image(
+            converted_doc=mock_doc,
+            doc_path=Path("sample.pdf"),
+            out_path=out_file,
+            gen_model="test-vlm",
+            gen_endpoint="http://localhost:8000",
+        )
+
+        assert count == 0
+        assert failures == {}
+        assert json.loads(out_file.read_text()) == {}
+
+    @patch("digitize.processing.images.summarize_and_classify_images")
+    def test_process_image_success(self, mock_summarize, tmp_path):
+        """Extracts pictures, resolves captions, and filters summaries."""
+        from digitize.processing.images import process_image
+
+        mock_pic1 = MagicMock()
+        mock_pic1.caption_text.return_value = "System Architecture Diagram"
+        mock_pic1.image.uri = "data:image/png;base64,abc123"
+        mock_pic1.prov = [MagicMock(page_no=1)]
+
+        mock_pic2 = MagicMock()
+        mock_pic2.caption_text.return_value = "Decorative line"
+        mock_pic2.image.uri = "data:image/png;base64,def456"
+        mock_pic2.prov = [MagicMock(page_no=2)]
+
+        mock_doc = MagicMock()
+        mock_doc.pictures = [mock_pic1, mock_pic2]
+
+        # First image kept (Yes), second image discarded (No)
+        mock_summarize.return_value = (
+            ["Diagram showing components.", "Decorative line."],
+            [True, False],
+            {},
+        )
+
+        out_file = tmp_path / "images.json"
+        count, proc_time, failures = process_image(
+            converted_doc=mock_doc,
+            doc_path=Path("sample.pdf"),
+            out_path=out_file,
+            gen_model="test-vlm",
+            gen_endpoint="http://localhost:8000",
+        )
+
+        assert count == 1
+        assert failures == {}
+        data = json.loads(out_file.read_text())
+        assert "0" in data
+        assert data["0"]["caption"] == "System Architecture Diagram"
+        assert data["0"]["summary"] == "Diagram showing components."
+        assert data["0"]["page_number"] == 1
+        assert "1" not in data  # filtered out by decision=False
+
+    def test_process_image_none_image_uri(self, tmp_path):
+        """When picture.image or picture.image.uri is None, uri evaluates to empty string, not 'None'."""
+        from digitize.processing.images import process_image
+
+        mock_pic1 = MagicMock()
+        mock_pic1.caption_text.return_value = "Caption only"
+        mock_pic1.image = MagicMock()
+        mock_pic1.image.uri = None
+        mock_pic1.prov = [MagicMock(page_no=1)]
+
+        mock_doc = MagicMock()
+        mock_doc.pictures = [mock_pic1]
+
+        with patch("digitize.processing.images.summarize_and_classify_images") as mock_summarize:
+            mock_summarize.return_value = (["Summary."], [True], {})
+            out_file = tmp_path / "images.json"
+            count, _, _ = process_image(
+                converted_doc=mock_doc,
+                doc_path=Path("sample.pdf"),
+                out_path=out_file,
+                gen_model="test-vlm",
+                gen_endpoint="http://localhost:8000",
+            )
+            assert count == 1
+            # Verify image_uri passed to summarize_and_classify_images was "" not "None"
+            called_images_data = mock_summarize.call_args[1]["images_data"]
+            assert called_images_data == [("", "Caption only")]
+
+    def test_summarize_and_classify_images_cancellation(self):
+        """When stop_event is set, summarize_and_classify_images raises JobCancelledError."""
+        import threading
+        from digitize.exceptions import JobCancelledError
+        from digitize.processing.images import summarize_and_classify_images
+
+        stop_event = threading.Event()
+        stop_event.set()
+
+        with pytest.raises(JobCancelledError):
+            summarize_and_classify_images(
+                images_data=[("data:image/png;base64,123", "caption")],
+                gen_model="test-vlm",
+                llm_endpoint="http://localhost:8000",
+                doc_path="sample.pdf",
+                stop_event=stop_event,
+            )
+
+    def test_extract_json_object_with_preamble_and_fences(self):
+        """_extract_json_object extracts JSON even if surrounded by prose or markdown code blocks."""
+        from digitize.processing.images import _extract_json_object
+
+        raw = 'Here is your analysis:\n```json\n{"summary": "Test chart", "is_informative": true}\n```\nHope this helps!'
+        extracted = _extract_json_object(raw)
+        assert json.loads(extracted) == {"summary": "Test chart", "is_informative": True}
+
+    def test_summarize_and_classify_single_image_empty_short_circuit(self):
+        """When both image_uri and caption are empty, short circuits without making network requests."""
+        from digitize.processing.images import summarize_and_classify_single_image
+
+        summary, decision = summarize_and_classify_single_image(
+            image_uri="",
+            caption="",
+            gen_model="test-vlm",
+            llm_endpoint="http://localhost:8000",
+        )
+        assert summary == "No summary available."
+        assert decision is False
+
+    def test_parse_image_response_fallback_valid(self):
+        """_parse_image_response_fallback extracts both fields from slightly malformed JSON."""
+        from digitize.processing.images import _parse_image_response_fallback
+
+        # Missing comma between fields — valid values but invalid JSON
+        malformed = '{"summary": "A bar chart showing sales data.", "is_informative": true'
+        result = _parse_image_response_fallback(malformed)
+        assert result["summary"] == "A bar chart showing sales data."
+        assert result["is_informative"] is True
+
+    def test_parse_image_response_fallback_false(self):
+        """_parse_image_response_fallback correctly parses is_informative=false."""
+        from digitize.processing.images import _parse_image_response_fallback
+
+        malformed = '{"summary": "Decorative border.", "is_informative": false'
+        result = _parse_image_response_fallback(malformed)
+        assert result["summary"] == "Decorative border."
+        assert result["is_informative"] is False
+
+    def test_parse_image_response_fallback_escaped_quotes(self):
+        """_parse_image_response_fallback handles escaped quotes inside the summary."""
+        from digitize.processing.images import _parse_image_response_fallback
+
+        malformed = r'{"summary": "Chart titled \"Revenue Q1\".", "is_informative": true'
+        result = _parse_image_response_fallback(malformed)
+        assert result["summary"] == 'Chart titled "Revenue Q1".'
+        assert result["is_informative"] is True
+
+    def test_parse_image_response_fallback_raises_when_unrecoverable(self):
+        """_parse_image_response_fallback raises ValueError when no fields can be extracted."""
+        from digitize.processing.images import _parse_image_response_fallback
+        import pytest
+
+        with pytest.raises(ValueError, match="Could not extract any fields"):
+            _parse_image_response_fallback("totally garbage text with no JSON fields")
+
+    def test_summarize_and_classify_single_image_uses_fallback_on_bad_json(self):
+        """When the model returns malformed JSON, the fallback parser is used instead of raising."""
+        from digitize.processing.images import summarize_and_classify_single_image
+        from unittest.mock import MagicMock, patch
+        import common.misc_utils as misc_utils
+
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = {
+            "choices": [{"message": {"content": '{"summary": "A pie chart.", "is_informative": true'}}]
+        }
+
+        original_session = misc_utils.SESSION
+        try:
+            misc_utils.SESSION = MagicMock()
+            misc_utils.SESSION.post.return_value = mock_response
+            summary, decision = summarize_and_classify_single_image(
+                image_uri="data:image/png;base64,abc",
+                caption="Test",
+                gen_model="test-vlm",
+                llm_endpoint="http://localhost:8000",
+            )
+            assert summary == "A pie chart."
+            assert decision is True
+        finally:
+            misc_utils.SESSION = original_session
+
+    def test_summarize_and_classify_single_image_no_extra_body(self):
+        """Payload sent to the LLM must not contain extra_body."""
+        from digitize.processing.images import summarize_and_classify_single_image
+        from unittest.mock import MagicMock, patch
+        import common.misc_utils as misc_utils
+
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = {
+            "choices": [{"message": {"content": '{"summary": "A chart.", "is_informative": true}'}}]
+        }
+
+        original_session = misc_utils.SESSION
+        try:
+            misc_utils.SESSION = MagicMock()
+            misc_utils.SESSION.post.return_value = mock_response
+            summarize_and_classify_single_image(
+                image_uri="data:image/png;base64,abc",
+                caption="Test",
+                gen_model="test-vlm",
+                llm_endpoint="http://localhost:8000",
+            )
+            _, kwargs = misc_utils.SESSION.post.call_args
+            sent_payload = kwargs.get("json", {})
+            assert "extra_body" not in sent_payload
+            assert sent_payload.get("response_format", {}).get("type") == "json_schema"
+        finally:
+            misc_utils.SESSION = original_session

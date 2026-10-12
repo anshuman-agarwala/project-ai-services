@@ -94,9 +94,8 @@ def create_indexing_handler(
                 from digitize.utils.db import get_document
                 try:
                     current_doc = get_document(doc_id)
-                    had_partial = bool(
-                        (current_doc.metadata or {}).get("had_table_failures", False)
-                    )
+                    meta = current_doc.metadata or {}
+                    had_partial = bool(meta.get("had_table_failures", False) or meta.get("had_image_failures", False))
                 except Exception:
                     had_partial = False
 
@@ -265,11 +264,11 @@ def ingest(
                 status_mgr.update_job_progress("", DocStatus.FAILED, JobStatus.FAILED, error=job_error_message)
 
             elif len(completed_with_errors_docs) > 0:
-                # All documents reached a terminal state, but some had table summarization errors
+                # All documents reached a terminal state, but some had table/image summarization errors
                 cwe_msg = (
                     f"{len(completed_with_errors_docs)} of {total_documents} document(s) completed with errors "
-                    f"due to table summarization failures. Those documents are queryable but their table summaries "
-                    f"may be incomplete."
+                    f"due to table or image summarization failures. Those documents are queryable but their table "
+                    f"and image summaries may be incomplete."
                 )
                 logger.info(
                     f"✅ Ingestion completed with errors, Time taken: {file_processing_time:.2f} seconds. "

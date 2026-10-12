@@ -128,6 +128,8 @@ text_chunk_suffix = "_text_chunk.json"
 text_suffix = "_text.json"
 table_suffix = "_table.json"
 table_chunk_suffix = "_table_chunk.json"
+image_suffix = "_image.json"
+image_chunk_suffix = "_image_chunk.json"
 
 def set_log_level(level):
     """Set the global log level used by all loggers created via get_logger."""
