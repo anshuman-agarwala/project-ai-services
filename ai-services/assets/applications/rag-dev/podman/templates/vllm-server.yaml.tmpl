@@ -58,6 +58,8 @@ spec:
           value: "/models/{{ .Values.instruct.model.name }}"
         - name: AIU_WORLD_SIZE
           value: "4"
+        - name: HF_HUB_DOWNLOAD_TIMEOUT
+          value: "1800"
         - name: VLLM_SPYRE_USE_CB
           value: "1"
         - name: MAX_MODEL_LEN
