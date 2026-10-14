@@ -35,12 +35,10 @@ spec:
   containers:
     - name: instruct
       image: "{{ .Values.instruct.image }}"
-      command: ["/bin/bash"]
+      command: ["/bin/bash", "-l", "-c"]
       args:
-        - "-c"
         - |
-          /opt/app-root/spyre_entrypoint.sh \
-          --model ${VLLM_MODEL_PATH} \
+          vllm serve ${VLLM_MODEL_PATH} \
           -tp ${AIU_WORLD_SIZE} \
           --max-model-len ${MAX_MODEL_LEN} \
           --max-num-seqs ${MAX_BATCH_SIZE} \
