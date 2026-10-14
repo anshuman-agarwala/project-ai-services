@@ -59,7 +59,10 @@ class DatabaseManager:
         """
         try:
             with get_db_session() as session:
-                return session.get(InvoiceJob, job_id)
+                job = session.get(InvoiceJob, job_id)
+                if job is not None:
+                    session.expunge(job)
+                return job
         except SQLAlchemyError as exc:
             logger.error(f"DB error fetching job {job_id!r}: {exc}", exc_info=True)
             return None
@@ -83,7 +86,7 @@ class DatabaseManager:
                     setattr(job, key, value)
                 job.updated_at = datetime.now(timezone.utc)
                 # Mark completed_at when reaching a terminal state
-                if fields.get("status") in ("completed", "rejected", "failed"):
+                if fields.get("status") in ("approved", "rejected", "failed"):
                     if job.completed_at is None:
                         job.completed_at = datetime.now(timezone.utc)
                 session.flush()
@@ -127,6 +130,8 @@ class DatabaseManager:
                         .limit(page_size)
                     ).scalars()
                 )
+                for row in rows:
+                    session.expunge(row)
                 return rows, total
         except SQLAlchemyError as exc:
             logger.error(f"DB error listing jobs: {exc}", exc_info=True)
