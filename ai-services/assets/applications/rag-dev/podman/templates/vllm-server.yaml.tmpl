@@ -47,10 +47,10 @@ spec:
         httpGet:
           path: /health
           port: 8000
-        initialDelaySeconds: 3600
+        initialDelaySeconds: 30
         periodSeconds: 30
         timeoutSeconds: 5
-        failureThreshold: 3
+        failureThreshold: 120
       env:
         - name: VLLM_MODEL_PATH
           value: "/models/{{ .Values.instruct.model.name }}"
