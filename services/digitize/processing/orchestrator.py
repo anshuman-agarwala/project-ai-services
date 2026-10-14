@@ -267,16 +267,20 @@ def chunk_text(input_path, out_path, emb_endpoint, max_tokens=512, doc_id=None, 
         return None, None
 
 
-def chunk_images(input_path, out_path, doc_id=None):
+def chunk_images(input_path, out_path, emb_endpoint, max_tokens=512, doc_id=None, language=LanguageCodes.ENGLISH):
     """
     Build chunk records from image summaries.
-    Each image maps to a single chunk (summaries are short enough to stay within token limits).
+    Summaries that exceed max_tokens are split into overlapping chunks to stay within
+    the embedding model's token limit.
     Called internally by chunk_single_file() for sequential processing.
 
     Args:
         input_path: Path to the image JSON file
         out_path: Output directory path
+        emb_endpoint: Embedding endpoint for token counting
+        max_tokens: Maximum tokens per chunk
         doc_id: Document ID
+        language: Language code for sentence splitting (detected from document text)
     """
     t0 = time.time()
     processed_image_chunk_json_path = Path(out_path) / f"{doc_id}{image_chunk_suffix}"
@@ -286,19 +290,38 @@ def chunk_images(input_path, out_path, doc_id=None):
             img_data = json.load(f)
 
         chunked_images = []
+        images_chunked_count = 0
+
         if img_data:
             for block in img_data.values():
-                chunked_images.append({
-                    "content": block.get("summary", ""),
-                    "caption": block.get("caption", ""),
-                    "page_number": block.get("page_number"),
-                })
+                caption = block.get("caption", "")
+                summary = block.get("summary", "")
+                page_number = block.get("page_number")
+
+                summary_token_count = count_tokens(summary, emb_endpoint)
+
+                if summary_token_count > max_tokens:
+                    images_chunked_count += 1
+                    chunks = split_text_into_token_chunks(summary, emb_endpoint, max_tokens=max_tokens, overlap=50, language=language)
+
+                    for chunk in chunks:
+                        chunked_images.append({
+                            "content": chunk,
+                            "caption": caption,
+                            "page_number": page_number,
+                        })
+                else:
+                    chunked_images.append({
+                        "content": summary,
+                        "caption": caption,
+                        "page_number": page_number,
+                    })
 
         with open(processed_image_chunk_json_path, "w") as f:
             json.dump(chunked_images, f, indent=2)
 
         elapsed = time.time() - t0
-        logger.debug(f"Built {len(chunked_images)} image chunks in {elapsed:.2f}s")
+        logger.debug(f"Built {len(chunked_images)} image chunks ({images_chunked_count} images split) in {elapsed:.2f}s")
         return processed_image_chunk_json_path, elapsed
     except Exception as e:
         logger.error(f"Error chunking images from '{input_path}': {e}")
@@ -390,7 +413,7 @@ def chunk_single_file(input_path, table_json_path, image_json_path, out_path, em
         table_chunk_json, table_chunk_time = chunk_tables(table_json_path, out_path, emb_endpoint, max_tokens, doc_id, splitter_lang)
         if cancel_event is not None and cancel_event.is_set():
             raise JobCancelledError(f"Chunking cancelled after table chunking for '{input_path}'")
-        image_chunk_json, image_chunk_time = chunk_images(image_json_path, out_path, doc_id)
+        image_chunk_json, image_chunk_time = chunk_images(image_json_path, out_path, emb_endpoint, max_tokens, doc_id, splitter_lang)
         total_time = time.time() - t0
         return text_chunk_json, table_chunk_json, image_chunk_json, total_time
     except JobCancelledError:
