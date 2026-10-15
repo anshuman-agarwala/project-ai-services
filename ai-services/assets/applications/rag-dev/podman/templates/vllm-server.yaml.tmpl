@@ -39,7 +39,7 @@ spec:
       args:
         - |
           vllm serve ${VLLM_MODEL_PATH} \
-          -tp ${AIU_WORLD_SIZE} \
+          -tp 1 \
           --max-model-len ${MAX_MODEL_LEN} \
           --max-num-seqs ${MAX_BATCH_SIZE} \
           --served-model-name {{ .Values.instruct.model.name }} --port 8000
