@@ -2,7 +2,7 @@
 Document-processing orchestrator.
 
 Responsibilities:
-- process_converted_document — load Docling JSON → text + table extraction
+- process_converted_document — load Docling JSON → text + table + image extraction
 - clean_intermediate_files   — remove per-doc staging artefacts
 - process_documents          — full pipeline: poll conversion_tasks → process → chunk → index
 - chunk_text / chunk_tables / chunk_single_file / flush_chunk
@@ -22,6 +22,8 @@ from common.lang_utils import LanguageCodes, split_sentences, to_sentence_splitt
 from common.misc_utils import (
     get_logger,
     get_utc_timestamp,
+    image_chunk_suffix,
+    image_suffix,
     table_chunk_suffix,
     table_suffix,
     text_chunk_suffix,
@@ -39,6 +41,7 @@ from digitize.processing.language import (
     detect_document_language,
     get_header_level,
 )
+from digitize.processing.images import process_image
 from digitize.processing.tables import process_table
 from digitize.processing.text import process_text, process_text_docx
 from digitize.settings import settings
@@ -264,6 +267,67 @@ def chunk_text(input_path, out_path, emb_endpoint, max_tokens=512, doc_id=None, 
         return None, None
 
 
+def chunk_images(input_path, out_path, emb_endpoint, max_tokens=512, doc_id=None, language=LanguageCodes.ENGLISH):
+    """
+    Build chunk records from image summaries.
+    Summaries that exceed max_tokens are split into overlapping chunks to stay within
+    the embedding model's token limit.
+    Called internally by chunk_single_file() for sequential processing.
+
+    Args:
+        input_path: Path to the image JSON file
+        out_path: Output directory path
+        emb_endpoint: Embedding endpoint for token counting
+        max_tokens: Maximum tokens per chunk
+        doc_id: Document ID
+        language: Language code for sentence splitting (detected from document text)
+    """
+    t0 = time.time()
+    processed_image_chunk_json_path = Path(out_path) / f"{doc_id}{image_chunk_suffix}"
+
+    try:
+        with open(input_path, "r") as f:
+            img_data = json.load(f)
+
+        chunked_images = []
+        images_chunked_count = 0
+
+        if img_data:
+            for block in img_data.values():
+                caption = block.get("caption", "")
+                summary = block.get("summary", "")
+                page_number = block.get("page_number")
+
+                summary_token_count = count_tokens(summary, emb_endpoint)
+
+                if summary_token_count > max_tokens:
+                    images_chunked_count += 1
+                    chunks = split_text_into_token_chunks(summary, emb_endpoint, max_tokens=max_tokens, overlap=50, language=language)
+
+                    for chunk in chunks:
+                        chunked_images.append({
+                            "content": chunk,
+                            "caption": caption,
+                            "page_number": page_number,
+                        })
+                else:
+                    chunked_images.append({
+                        "content": summary,
+                        "caption": caption,
+                        "page_number": page_number,
+                    })
+
+        with open(processed_image_chunk_json_path, "w") as f:
+            json.dump(chunked_images, f, indent=2)
+
+        elapsed = time.time() - t0
+        logger.debug(f"Built {len(chunked_images)} image chunks ({images_chunked_count} images split) in {elapsed:.2f}s")
+        return processed_image_chunk_json_path, elapsed
+    except Exception as e:
+        logger.error(f"Error chunking images from '{input_path}': {e}")
+        return None, None
+
+
 def chunk_tables(input_path, out_path, emb_endpoint, max_tokens=512, doc_id=None, language=LanguageCodes.ENGLISH):
     """
     Chunk table summaries into smaller pieces if they exceed token limits.
@@ -325,13 +389,14 @@ def chunk_tables(input_path, out_path, emb_endpoint, max_tokens=512, doc_id=None
         return None, None
 
 
-def chunk_single_file(input_path, table_json_path, out_path, emb_endpoint, max_tokens=512, doc_id=None, language=LanguageCodes.ENGLISH, cancel_event=None):
+def chunk_single_file(input_path, table_json_path, image_json_path, out_path, emb_endpoint, max_tokens=512, doc_id=None, language=LanguageCodes.ENGLISH, cancel_event=None):
     """
-    Orchestrates chunking of both text and tables for a single document.
+    Orchestrates chunking of text, tables, and images for a single document.
 
     Args:
         input_path: Path to the text JSON file
         table_json_path: Path to the table JSON file
+        image_json_path: Path to the image JSON file
         out_path: Output directory path
         emb_endpoint: Embedding endpoint for token counting
         max_tokens: Maximum tokens per chunk
@@ -346,34 +411,42 @@ def chunk_single_file(input_path, table_json_path, out_path, emb_endpoint, max_t
         if cancel_event is not None and cancel_event.is_set():
             raise JobCancelledError(f"Chunking cancelled after text chunking for '{input_path}'")
         table_chunk_json, table_chunk_time = chunk_tables(table_json_path, out_path, emb_endpoint, max_tokens, doc_id, splitter_lang)
+        if cancel_event is not None and cancel_event.is_set():
+            raise JobCancelledError(f"Chunking cancelled after table chunking for '{input_path}'")
+        image_chunk_json, image_chunk_time = chunk_images(image_json_path, out_path, emb_endpoint, max_tokens, doc_id, splitter_lang)
         total_time = time.time() - t0
-        return text_chunk_json, table_chunk_json, total_time
+        return text_chunk_json, table_chunk_json, image_chunk_json, total_time
     except JobCancelledError:
         raise
     except Exception as e:
         logger.error(f"Error chunking document '{input_path}': {e}")
-        return None, None, None
+        return None, None, None, None
 
 
-def count_chunks(in_txt_f, in_tab_f):
-    """Count total chunks from text and table JSON files without creating document objects."""
+def count_chunks(in_txt_f, in_tab_f, in_img_f):
+    """Count total chunks from text, table, and image JSON files without creating document objects."""
     with open(in_txt_f, "r") as f:
         txt_data = json.load(f)
     with open(in_tab_f, "r") as f:
         tab_data = json.load(f)
+    with open(in_img_f, "r") as f:
+        img_data = json.load(f)
     txt_count = len(txt_data) if txt_data else 0
     tab_count = len(tab_data) if tab_data else 0
-    return txt_count + tab_count
+    img_count = len(img_data) if img_data else 0
+    return txt_count + tab_count + img_count
 
 
-def merge_chunked_documents(in_txt_chunk_f, in_tab_chunk_f, orig_fn):
+def merge_chunked_documents(in_txt_chunk_f, in_tab_chunk_f, in_img_chunk_f, orig_fn):
     """
-    Merge pre-chunked text and table documents into final chunk list.
+    Merge pre-chunked text, table, and image documents into final chunk list.
     """
     with open(in_txt_chunk_f, "r") as f:
         txt_data = json.load(f)
     with open(in_tab_chunk_f, "r") as f:
         tab_data = json.load(f)
+    with open(in_img_chunk_f, "r") as f:
+        img_data = json.load(f)
 
     created_at = get_utc_timestamp()
 
@@ -434,7 +507,30 @@ def merge_chunked_documents(in_txt_chunk_f, in_tab_chunk_f, orig_fn):
                 "created_at": created_at,
             })
 
-    combined_docs = txt_docs + tab_docs
+    img_docs = []
+    if len(img_data):
+        base_count = len(txt_docs) + len(tab_docs)
+        for img_idx, block in enumerate(img_data):
+            caption = block.get("caption", "")
+            page_number = block.get("page_number")
+            content = block.get("content", "")
+
+            page_content = content
+            if caption and caption not in content:
+                page_content = f"{caption}\n{content}"
+
+            img_docs.append({
+                "page_content": page_content,
+                "filename": orig_fn,
+                "type": "image",
+                "source": caption,
+                "page_number": page_number,
+                "language": "en",
+                "chunk_index": base_count + img_idx,
+                "created_at": created_at,
+            })
+
+    combined_docs = txt_docs + tab_docs + img_docs
     total_chunks = len(combined_docs)
     for doc in combined_docs:
         doc["total_chunks"] = total_chunks
@@ -449,18 +545,19 @@ def merge_chunked_documents(in_txt_chunk_f, in_tab_chunk_f, orig_fn):
 
 def process_converted_document(converted_json_path, doc_path, out_path, gen_model, gen_endpoint, emb_endpoint, max_tokens, doc_id, stop_event: threading.Event | None = None):
     """
-    Process converted document to extract text and tables.
+    Process converted document to extract text, tables, and images.
     No caching - always process fresh.
     Returns detected language along with other results.
 
     Args:
-        stop_event: Optional threading.Event. When set, table summarization is
-                    cut short between individual LLM calls (see process_table).
+        stop_event: Optional threading.Event. When set, table and image summarization is
+                    cut short between individual LLM calls (see process_table / process_image).
     """
     processed_text_json_path = (Path(out_path) / f"{doc_id}{text_suffix}")
     processed_table_json_path = (Path(out_path) / f"{doc_id}{table_suffix}")
+    processed_image_json_path = (Path(out_path) / f"{doc_id}{image_suffix}")
 
-    timings: dict[str, float] = {"process_text": 0.0, "process_tables": 0.0}
+    timings: dict[str, float] = {"process_text": 0.0, "process_tables": 0.0, "process_images": 0.0}
 
     if stop_event and stop_event.is_set():
         raise JobCancelledError(f"Job cancelled before processing document: {doc_path}")
@@ -495,17 +592,26 @@ def process_converted_document(converted_json_path, doc_path, out_path, gen_mode
         )
         timings["process_tables"] = process_time
 
-        return processed_text_json_path, processed_table_json_path, page_count, table_count, timings, document_language, table_failures
+        if stop_event and stop_event.is_set():
+            raise JobCancelledError(f"Job cancelled before processing images for document: {doc_path}")
+
+        image_count, process_time, image_failures = process_image(
+            converted_doc, doc_path, processed_image_json_path, gen_model, gen_endpoint, document_language,
+            stop_event=stop_event,
+        )
+        timings["process_images"] = process_time
+
+        return processed_text_json_path, processed_table_json_path, processed_image_json_path, page_count, table_count, image_count, timings, document_language, table_failures, image_failures
     except JobCancelledError:
         raise
     except Exception as e:
         logger.error(f"Error processing converted document: {doc_path}. Details: {e}", exc_info=True)
-        return None, None, None, None, None, None, None
+        return None, None, None, None, None, None, None, None, None, None
 
 
 def clean_intermediate_files(doc_id, out_path):
     """Remove intermediate files but keep <doc_id>.json."""
-    for pattern in [f"{doc_id}{text_suffix}", f"{doc_id}{table_suffix}", f"{doc_id}{text_chunk_suffix}", f"{doc_id}{table_chunk_suffix}"]:
+    for pattern in [f"{doc_id}{text_suffix}", f"{doc_id}{table_suffix}", f"{doc_id}{image_suffix}", f"{doc_id}{text_chunk_suffix}", f"{doc_id}{table_chunk_suffix}", f"{doc_id}{image_chunk_suffix}"]:
         file_path = Path(out_path) / pattern
         if file_path.exists():
             try:
@@ -748,13 +854,13 @@ def process_documents(
                     path = process_futures.pop(fut)
                     doc_id = doc_id_dict.get(Path(path).name)
                     try:
-                        txt_json, tab_json, pgs, tabs, timings, doc_lang, table_failures = fut.result()
+                        txt_json, tab_json, img_json, pgs, tabs, imgs, timings, doc_lang, table_failures, image_failures = fut.result()
 
-                        if not txt_json or not tab_json:
+                        if not txt_json or not tab_json or not img_json:
                             if doc_id is not None:
                                 logger.error(
                                     f"Processing failed for {path}: "
-                                    f"txt_json or tab_json is None"
+                                    f"txt_json, tab_json, or img_json is None"
                                 )
                                 status_mgr.update_doc_metadata(
                                     doc_id, {"status": DocStatus.FAILED},
@@ -767,13 +873,15 @@ def process_documents(
                             continue
 
                         total_processing_time = round(
-                            float(timings.get("process_text", 0) + timings.get("process_tables", 0)), 2
+                            float(timings.get("process_text", 0) + timings.get("process_tables", 0) + timings.get("process_images", 0)), 2
                         )
                         converted_pdf_stats.setdefault(path, {"timings": {}})
                         converted_pdf_stats[path].update({
                             "page_count": pgs,
                             "table_count": tabs,
+                            "image_count": imgs,
                             "had_table_failures": bool(table_failures),
+                            "had_image_failures": bool(image_failures),
                         })
                         converted_pdf_stats[path]["timings"]["processing"] = total_processing_time
 
@@ -789,10 +897,17 @@ def process_documents(
                                     f"with errors; those tables will use fallback summaries"
                                 )
 
+                            if image_failures:
+                                logger.warning(
+                                    f"Document {doc_id}: {len(image_failures)} image(s) completed "
+                                    f"with errors; those images will use fallback summaries"
+                                )
+
                             status_mgr.update_doc_metadata(doc_id, {
                                 "status": DocStatus.PROCESSED,
                                 "pages": pgs,
                                 "tables": tabs,
+                                "images": imgs,
                                 "timing_in_secs": {**converted_pdf_stats[path]["timings"]},
                             })
                             status_mgr.update_job_progress(
@@ -806,7 +921,7 @@ def process_documents(
 
                         c_future = chunker_executor.submit(
                             chunk_single_file,
-                            txt_json, tab_json, out_path,
+                            txt_json, tab_json, img_json, out_path,
                             emb_endpoint, max_tokens,
                             doc_id=doc_id, language=doc_lang,
                             cancel_event=_process_stop_event,
@@ -836,9 +951,9 @@ def process_documents(
                     path = chunk_futures.pop(fut)
                     doc_id = doc_id_dict.get(Path(path).name)
                     try:
-                        text_chunk_json, table_chunk_json, total_time = fut.result()
+                        text_chunk_json, table_chunk_json, image_chunk_json, total_time = fut.result()
 
-                        if not text_chunk_json or not table_chunk_json:
+                        if not text_chunk_json or not table_chunk_json or not image_chunk_json:
                             if doc_id is not None:
                                 logger.error(f"Chunking failed for {path}")
                                 status_mgr.update_doc_metadata(
@@ -851,11 +966,12 @@ def process_documents(
                             converted_pdf_stats.pop(path, None)
                             continue
 
-                        chunk_count = count_chunks(text_chunk_json, table_chunk_json)
+                        chunk_count = count_chunks(text_chunk_json, table_chunk_json, image_chunk_json)
                         converted_pdf_stats.setdefault(path, {"timings": {}})
                         converted_pdf_stats[path]["timings"]["chunking"] = round(float(total_time or 0), 2)
                         converted_pdf_stats[path]["chunk_count"] = chunk_count
                         had_table_failures = converted_pdf_stats[path].get("had_table_failures", False)
+                        had_image_failures = converted_pdf_stats[path].get("had_image_failures", False)
 
                         if doc_id is not None:
                             logger.debug(
@@ -867,11 +983,13 @@ def process_documents(
                                 "chunks": chunk_count,
                                 "timing_in_secs": {**converted_pdf_stats[path]["timings"]},
                             }
-                            # Persist the table-error flag into the doc's metadata JSONB
-                            # so that the indexing callback in ingest.py can read it without
+                            # Persist the table/image error flags into the doc's metadata JSONB
+                            # so that the indexing callback in ingest.py can read them without
                             # ambiguity (reading doc.status would be ambiguous mid-pipeline).
                             if had_table_failures:
                                 metadata_update["had_table_failures"] = True
+                            if had_image_failures:
+                                metadata_update["had_image_failures"] = True
                             status_mgr.update_doc_metadata(doc_id, metadata_update)
                             status_mgr.update_job_progress(
                                 doc_id, DocStatus.CHUNKED, JobStatus.IN_PROGRESS
@@ -885,7 +1003,7 @@ def process_documents(
                             if indexing_callback:
                                 try:
                                     doc_chunks = merge_chunked_documents(
-                                        text_chunk_json, table_chunk_json, path
+                                        text_chunk_json, table_chunk_json, image_chunk_json, path
                                     )
                                     for chunk in doc_chunks:
                                         chunk["doc_id"] = doc_id

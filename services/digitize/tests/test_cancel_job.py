@@ -888,7 +888,7 @@ class TestOrchestratorCancellationAtChunkingStage:
         task_completed = _make_task_stub("t-1", "completed", result_path="conv.json")
 
         proc_fut: Future = Future()
-        proc_fut.set_result(("txt.json", "tab.json", 5, 2, {"process_text": 0.1, "process_tables": 0.1}, "en", {}))
+        proc_fut.set_result(("txt.json", "tab.json", "img.json", 5, 2, 1, {"process_text": 0.1, "process_tables": 0.1, "process_images": 0.0}, "en", {}, {}))
 
         # chunk_future raises JobCancelledError — simulates the chunker worker
         # being interrupted by the _process_stop_event.
@@ -948,10 +948,10 @@ class TestOrchestratorCancellationAtIndexingStage:
         task_completed = _make_task_stub("t-1", "completed", result_path="conv.json")
 
         proc_fut: Future = Future()
-        proc_fut.set_result(("txt.json", "tab.json", 5, 2, {"process_text": 0.1, "process_tables": 0.1}, "en", {}))
+        proc_fut.set_result(("txt.json", "tab.json", "img.json", 5, 2, 1, {"process_text": 0.1, "process_tables": 0.1, "process_images": 0.0}, "en", {}, {}))
 
         chunk_fut: Future = Future()
-        chunk_result = ("text_chunks.json", "table_chunks.json", 2.5)
+        chunk_result = ("text_chunks.json", "table_chunks.json", "image_chunks.json", 2.5)
         chunk_fut.set_result(chunk_result)
 
         pending_index_fut: Future = Future()
@@ -1034,10 +1034,10 @@ class TestOrchestratorCancellationAtIndexingStage:
         task_completed = _make_task_stub("t-1", "completed", result_path="conv.json")
 
         proc_fut: Future = Future()
-        proc_fut.set_result(("txt.json", "tab.json", 5, 2, {"process_text": 0.1, "process_tables": 0.1}, "en", {}))
+        proc_fut.set_result(("txt.json", "tab.json", "img.json", 5, 2, 1, {"process_text": 0.1, "process_tables": 0.1, "process_images": 0.0}, "en", {}, {}))
 
         chunk_fut: Future = Future()
-        chunk_fut.set_result(("text_chunks.json", "table_chunks.json", 2.5))
+        chunk_fut.set_result(("text_chunks.json", "table_chunks.json", "image_chunks.json", 2.5))
 
         # RUNNING future that only resolves after cancel_seen is set.
         # This guarantees the future is still RUNNING on the first True from is_cancelled().
@@ -1125,10 +1125,10 @@ class TestOrchestratorHappyPath:
         task_completed = _make_task_stub("t-1", "completed", result_path="conv.json")
 
         proc_fut: Future = Future()
-        proc_fut.set_result(("txt.json", "tab.json", 10, 3, {"process_text": 0.5, "process_tables": 0.3}, "en", {}))
+        proc_fut.set_result(("txt.json", "tab.json", "img.json", 10, 3, 2, {"process_text": 0.5, "process_tables": 0.3, "process_images": 0.1}, "en", {}, {}))
 
         chunk_fut: Future = Future()
-        chunk_fut.set_result(("text_chunks.json", "table_chunks.json", 1.2))
+        chunk_fut.set_result(("text_chunks.json", "table_chunks.json", "image_chunks.json", 1.2))
 
         mock_db = Mock()
         mock_db.get_conversion_tasks_by_job_id = Mock(return_value=[task_completed])
@@ -1584,10 +1584,11 @@ class TestChunkSingleFileCancelEvent:
                 side_effect=JobCancelledError("cancelled"),
             ),
             patch("digitize.processing.orchestrator.chunk_tables"),
+            patch("digitize.processing.orchestrator.chunk_images"),
         ):
             with pytest.raises(JobCancelledError):
                 chunk_single_file(
-                    "txt.json", "tab.json", str(tmp_path),
+                    "txt.json", "tab.json", "img.json", str(tmp_path),
                     emb_endpoint="emb", doc_id="doc-9",
                     cancel_event=event,
                 )
@@ -1602,6 +1603,8 @@ class TestChunkSingleFileCancelEvent:
         txt_result = tmp_path / "doc-10_text_chunks.json"
         tab_result = tmp_path / "doc-10_table_chunks.json"
 
+        img_result = tmp_path / "doc-10_image_chunks.json"
+
         with (
             patch(
                 "digitize.processing.orchestrator.chunk_text",
@@ -1611,9 +1614,13 @@ class TestChunkSingleFileCancelEvent:
                 "digitize.processing.orchestrator.chunk_tables",
                 return_value=(str(tab_result), 0.3),
             ),
+            patch(
+                "digitize.processing.orchestrator.chunk_images",
+                return_value=(str(img_result), 0.1),
+            ),
         ):
             chunk_single_file(
-                "txt.json", "tab.json", str(tmp_path),
+                "txt.json", "tab.json", "img.json", str(tmp_path),
                 emb_endpoint="emb", doc_id="doc-10",
                 cancel_event=event,
             )
@@ -1737,11 +1744,11 @@ class TestOrchestratorIndexCancelEventCleanFilesGating:
 
         proc_fut: Future = Future()
         proc_fut.set_result(
-            ("txt.json", "tab.json", 5, 2, {"process_text": 0.1, "process_tables": 0.1}, "en", {})
+            ("txt.json", "tab.json", "img.json", 5, 2, 1, {"process_text": 0.1, "process_tables": 0.1, "process_images": 0.0}, "en", {}, {})
         )
 
         chunk_fut: Future = Future()
-        chunk_fut.set_result(("text_chunks.json", "table_chunks.json", 2.5))
+        chunk_fut.set_result(("text_chunks.json", "table_chunks.json", "image_chunks.json", 2.5))
 
         return task, proc_fut, chunk_fut
 
