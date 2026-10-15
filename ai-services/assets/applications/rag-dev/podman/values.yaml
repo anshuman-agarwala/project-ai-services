@@ -56,7 +56,7 @@ instruct:
   # @description API key for vLLM instruct service authentication. If empty, authentication is disabled. Provide a key to enable authentication.
   apiKey: ""
   # @hidden
-  image: icr.io/ai_sw_accel/2.0/next/spyre-inference:ppc64le-dev
+  image: registry.redhat.io/rhaii-fast/vllm-spyre-rhel9:3.6.0-fast.1-1789070775
   model:
     # @hidden
     name: mistralai/Ministral-3-14B-Instruct-2512-BF16

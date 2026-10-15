@@ -35,11 +35,13 @@ spec:
   containers:
     - name: instruct
       image: "{{ .Values.instruct.image }}"
-      command: ["/bin/bash", "-l", "-c"]
+      command: ["/bin/bash"]
       args:
+        - "-c"
         - |
-          vllm serve ${VLLM_MODEL_PATH} \
-          -tp 4 \
+          /opt/app-root/spyre_entrypoint.sh \
+          --model ${VLLM_MODEL_PATH} \
+          -tp ${AIU_WORLD_SIZE} \
           --max-model-len ${MAX_MODEL_LEN} \
           --max-num-seqs ${MAX_BATCH_SIZE} \
           --served-model-name {{ .Values.instruct.model.name }} --port 8000
@@ -56,10 +58,6 @@ spec:
           value: "/models/{{ .Values.instruct.model.name }}"
         - name: AIU_WORLD_SIZE
           value: "4"
-        - name: SPYRE_DEVICES
-          value: "0,1,2,3"
-        - name: HF_HUB_DOWNLOAD_TIMEOUT
-          value: "1800"
         - name: VLLM_SPYRE_USE_CB
           value: "1"
         - name: MAX_MODEL_LEN
