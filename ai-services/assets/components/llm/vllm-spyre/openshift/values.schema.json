@@ -22,9 +22,14 @@
           "const": "mistralai/Ministral-3-14B-Instruct-2512-BF16",
           "title": "Ministral-3-14B-Instruct-2512-BF16",
           "description": "A 14b-parameter instruction-tuned LLM from Mistral AI in BF16 precision. Powers natural language understanding and generation tasks including prompt-based reasoning, summarization, and answer generation.\n\n**Model strengths**: Strong instruction-following, multilingual capability, and efficient inference at the 14b scale.\n\n**Supported Languages**: English, French, German, Spanish, Italian, Portuguese, and more."
+        },
+        {
+          "const": "google/gemma-4-26B-A4B-it",
+          "title": "gemma-4-26B-A4B-it",
+          "description": "A 26b-parameter instruction-tuned multimodal LLM from Google in a 4-bit quantized format. Powers natural language understanding and generation tasks including prompt-based reasoning, summarization, and answer generation.\n\n**Model strengths**: Strong instruction-following, multimodal capability, and efficient inference at the 26b scale.\n\n**Supported Languages**: English and multilingual."
         }
       ],
-      "default": "mistralai/Ministral-3-14B-Instruct-2512-BF16"
+      "default": "google/gemma-4-26B-A4B-it"
     },
     "apiKey": {
       "type": "string",

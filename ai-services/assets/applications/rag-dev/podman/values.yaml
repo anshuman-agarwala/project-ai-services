@@ -59,7 +59,7 @@ instruct:
   image: icr.io/ai_sw_accel/2.0/next/spyre-inference:ppc64le-dev
   model:
     # @hidden
-    name: mistralai/Ministral-3-14B-Instruct-2512-BF16
+    name: google/gemma-4-26B-A4B-it
     # @hidden
     maxModelLen: 32768
     # @hidden
