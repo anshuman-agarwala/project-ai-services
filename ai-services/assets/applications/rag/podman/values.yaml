@@ -52,12 +52,12 @@ postgres:
 
 instruct:
   # @hidden
-  image: icr.io/ai_sw_accel/2.0/next/spyre-inference:ppc64le-dev
+  image: registry.redhat.io/rhaii/vllm-spyre-rhel9:3.5.0
   # @description API key for vLLM instruct service authentication. If empty, authentication is disabled. Provide a key to enable authentication.
   apiKey: ""
   model:
     # @hidden
-    name: google/gemma-4-26B-A4B-it
+    name: ibm-granite/granite-4.1-8b-fp8
     # @hidden
     maxModelLen: 32768
     # @hidden
