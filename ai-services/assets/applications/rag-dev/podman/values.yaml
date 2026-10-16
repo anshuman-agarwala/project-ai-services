@@ -61,9 +61,9 @@ instruct:
     # @hidden
     name: google/gemma-4-26B-A4B-it
     # @hidden
-    maxModelLen: 32768
+    maxModelLen: 8192
     # @hidden
-    maxBatchSize: 32
+    maxBatchSize: 16
 
 embedding:
   # @hidden
