@@ -13,7 +13,8 @@ metadata:
     ai-services.io/model1: {{ .Values.reranker.model.name }}
     ai-services.io/model2: {{ .Values.embedding.model.name }}
     ai-services.io/model3: {{ .Values.instruct.model.name }}
-    ai-services.io/instruct--spyre-cards: "1"
+    ai-services.io/instruct--spyre-cards: "4"
+    ai-services.io/reranker--spyre-cards: "1"
 spec:
   volumes:
     - name: dshm
@@ -35,11 +36,13 @@ spec:
   containers:
     - name: instruct
       image: "{{ .Values.instruct.image }}"
-      command: ["/bin/bash", "-l", "-c"]
+      command: ["/bin/bash"]
       args:
+        - "-c"
         - |
-          vllm serve ${VLLM_MODEL_PATH} \
-          -tp 1 \
+          /opt/app-root/spyre_entrypoint.sh \
+          --model ${VLLM_MODEL_PATH} \
+          -tp ${AIU_WORLD_SIZE} \
           --max-model-len ${MAX_MODEL_LEN} \
           --max-num-seqs ${MAX_BATCH_SIZE} \
           --served-model-name {{ .Values.instruct.model.name }} --port 8000
@@ -54,14 +57,8 @@ spec:
       env:
         - name: VLLM_MODEL_PATH
           value: "/models/{{ .Values.instruct.model.name }}"
-        - name: FRONTEND_POOL_ALLOCATION
-          value: "1"
         - name: AIU_WORLD_SIZE
-          value: "1"
-        - name: SPYRE_DEVICES
-          value: "0"
-        - name: HF_HUB_DOWNLOAD_TIMEOUT
-          value: "1800"
+          value: "4"
         - name: MAX_MODEL_LEN
           value: "{{ .Values.instruct.model.maxModelLen }}"
         - name: MAX_BATCH_SIZE
@@ -82,10 +79,10 @@ spec:
         {{- end }}
       resources:
         requests:
-          podman.io/device=/dev/vfio: 1
-          memory: "150Gi"
+          podman.io/device=/dev/vfio: 4
+          memory: "200Gi"
         limits:
-          memory: "150Gi"
+          memory: "200Gi"
       ports:
         - containerPort: 8000
       volumeMounts:
@@ -107,7 +104,7 @@ spec:
         initialDelaySeconds: 120
         periodSeconds: 30
         timeoutSeconds: 5
-        failureThreshold: 60
+        failureThreshold: 3
       resources:
         requests:
           memory: "5Gi"
@@ -123,10 +120,14 @@ spec:
           name: dshm3
     - name: reranker
       image: "{{ .Values.reranker.image }}"
-      command: ["/bin/sh", "-c"]
-      args: [
-          "vllm serve /models/{{ .Values.reranker.model.name }} --served-model-name {{ .Values.reranker.model.name }} --port 8002 --gpu-memory-utilization=0.5 --max-model-len=1024 --dtype=bfloat16"
-      ]
+      command: ["/bin/bash"]
+      args:
+        - "-c"
+        - |
+          /opt/app-root/spyre_entrypoint.sh \
+          --model ${VLLM_MODEL_PATH} \
+          -tp ${AIU_WORLD_SIZE} \
+          --served-model-name {{ .Values.reranker.model.name }} --port 8002 --gpu-memory-utilization=0.5
       livenessProbe:
         httpGet:
           path: /health
@@ -134,9 +135,29 @@ spec:
         initialDelaySeconds: 120
         periodSeconds: 30
         timeoutSeconds: 5
-        failureThreshold: 60
+        failureThreshold: 3
+      env:
+        - name: VLLM_MODEL_PATH
+          value: "/models/{{ .Values.reranker.model.name }}"
+        - name: AIU_WORLD_SIZE
+          value: "1"
+        - name: SENDNN_INFERENCE_WARMUP_BATCH_SIZES
+          value: "4"
+        - name: SENDNN_INFERENCE_WARMUP_PROMPT_LENS
+          value: "1024"
+        - name: MASTER_PORT
+          value: "12356"
+        {{- /* Check if .env.reranker exists and is a non-empty map */}}
+        {{- with .env.reranker }}
+          {{- /* If it does, '.' (dot) is now scoped to .env.reranker */}}
+          {{- range $k, $v := . }}
+        - name: {{ $k }}
+          value: "{{ $v }}"
+          {{- end }}
+        {{- end }}
       resources:
         requests:
+          podman.io/device=/dev/vfio: 1
           memory: "5Gi"
         limits:
           memory: "5Gi"
