@@ -52,16 +52,16 @@ postgres:
 
 instruct:
   # @hidden
-  image: registry.redhat.io/rhaii/vllm-spyre-rhel9:3.5.0
+  image: icr.io/ai_sw_accel/2.0/next/spyre-inference:ppc64le-dev
   # @description API key for vLLM instruct service authentication. If empty, authentication is disabled. Provide a key to enable authentication.
   apiKey: ""
   model:
     # @hidden
-    name: ibm-granite/granite-4.1-8b-fp8
+    name: google/gemma-4-26B-A4B-it
     # @hidden
-    maxModelLen: 32768
+    maxModelLen: 8192
     # @hidden
-    maxBatchSize: 32
+    maxBatchSize: 16
 
 embedding:
   # @hidden
@@ -74,7 +74,7 @@ embedding:
 
 reranker:
   # @hidden
-  image: registry.redhat.io/rhaii/vllm-spyre-rhel9:3.5.0
+  image: icr.io/ppc64le-oss/vllm-ppc64le:0.28.0
   model:
     # @hidden
     name: BAAI/bge-reranker-v2-m3
