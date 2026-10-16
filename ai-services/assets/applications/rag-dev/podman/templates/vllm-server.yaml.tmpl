@@ -54,6 +54,8 @@ spec:
       env:
         - name: VLLM_MODEL_PATH
           value: "/models/{{ .Values.instruct.model.name }}"
+        - name: FRONTEND_POOL_ALLOCATION
+          value: "1"
         - name: AIU_WORLD_SIZE
           value: "1"
         - name: SPYRE_DEVICES
